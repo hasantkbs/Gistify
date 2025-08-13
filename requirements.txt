@@ -1,0 +1,11 @@
+transformers
+torch
+accelerate
+ipywidgets
+tqdm
+openai
+protobuf
+blobfile
+fastapi
+uvicorn
+langdetect
