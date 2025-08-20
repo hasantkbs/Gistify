@@ -1,14 +1,14 @@
-from fastapi import FastAPI
+from fastapi import APIRouter
 from pydantic import BaseModel
-import uvicorn
 import os
-from gistify import summarize_long_text, clean_summary, read_pdf_text, read_docx_text, split_text_into_chunks, summarize_chunk
 
-app = FastAPI(
-    title="Gistify API",
-    description="API for summarizing text using the Gistify model.",
-    version="1.0.0",
-)
+from core.summarizer import summarize_long_text
+from input_handlers.pdf_handler import read_pdf_text
+from input_handlers.docx_handler import read_docx_text
+from input_handlers.text_handler import read_text_file
+from core.utils import clean_summary # Assuming clean_summary is in core.utils
+
+router = APIRouter()
 
 class SummarizeRequest(BaseModel):
     text: str
@@ -16,7 +16,7 @@ class SummarizeRequest(BaseModel):
 class SummarizeFileRequest(BaseModel):
     file_path: str
 
-@app.post("/summarize")
+@router.post("/summarize")
 async def summarize_text(request: SummarizeRequest):
     """
     Summarizes the provided text.
@@ -36,7 +36,7 @@ async def summarize_text(request: SummarizeRequest):
     cleaned_summary = clean_summary(summary)
     return {"summary": cleaned_summary}
 
-@app.post("/summarize_file")
+@router.post("/summarize_file")
 async def summarize_file(request: SummarizeFileRequest):
     """
     Summarizes the content of a file.
@@ -49,8 +49,9 @@ async def summarize_file(request: SummarizeFileRequest):
     file_extension = os.path.splitext(file_path)[1].lower()
     text = ""
     if file_extension == ".txt":
-        with open(file_path, "r", encoding="utf-8") as f:
-            text = f.read()
+        text = read_text_file(file_path)
+        if text.startswith("Metin dosyası okuma hatası:"):
+            return {"error": text}
     elif file_extension == ".pdf":
         text = read_pdf_text(file_path)
         if text.startswith("PDF okuma hatası:"):
@@ -75,6 +76,3 @@ async def summarize_file(request: SummarizeFileRequest):
     
     cleaned_summary = clean_summary(summary)
     return {"summary": cleaned_summary}
-
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)

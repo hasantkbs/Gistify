@@ -1,11 +1,10 @@
 transformers
 torch
-accelerate
-ipywidgets
 tqdm
-openai
-protobuf
-blobfile
 fastapi
-uvicorn
+uvicorn[standard]
 langdetect
+PyPDF2
+python-docx
+pydantic
+python-dotenv
