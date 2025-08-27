@@ -1,13 +1,17 @@
-from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
+from transformers import pipeline
 from langdetect import detect, DetectorFactory
-from .utils import LANG_CODE_MAP, MAX_CHUNK_CHARS, MIN_OVERLAP_CHARS, clean_summary, split_text_into_chunks
+import yake
+import nltk
+from sumy.parsers.plaintext import PlaintextParser
+from sumy.nlp.tokenizers import Tokenizer
+from sumy.summarizers.lsa import LsaSummarizer
+from sumy.summarizers.lexrank import LexRankSummarizer
+from sumy.summarizers.textrank import TextRankSummarizer
+from .utils import LANG_CODE_MAP, MAX_CHUNK_CHARS, clean_summary, split_text_into_chunks
+from config.settings import BART_MODEL_NAME, MT5_MODEL_NAME, TURKISH_MODEL_NAME
 
 # Set seed for reproducibility in langdetect
 DetectorFactory.seed = 0
-
-# Define model names
-BART_MODEL_NAME = "facebook/bart-large-cnn"
-MT5_MODEL_NAME = "csebuetnlp/mT5_multilingual_XLSum"
 
 # Store loaded pipelines to avoid reloading
 _summarizer_pipelines = {}
@@ -17,6 +21,8 @@ def get_summarizer_pipeline(lang_code: str):
 
     if lang_code == "en":
         model_name = BART_MODEL_NAME
+    elif lang_code == "tr":
+        model_name = TURKISH_MODEL_NAME
     else:
         model_name = MT5_MODEL_NAME
 
@@ -26,7 +32,7 @@ def get_summarizer_pipeline(lang_code: str):
         print(f"Model {model_name} loaded.")
     return _summarizer_pipelines[model_name]
 
-def summarize_chunk(text: str) -> str:
+def summarize_chunk(text: str, length: str = "medium") -> str:
     """
     Verilen metin parçasını yerel özetleyici model ile özetler.
     """
@@ -38,51 +44,25 @@ def summarize_chunk(text: str) -> str:
         except:
             pass # langdetect can fail on very short or non-text inputs
 
-        # Map to mBART language code
-        mbart_lang_code = LANG_CODE_MAP.get(detected_lang, "en_XX") # Default to en_XX
-
         # Get the appropriate summarizer pipeline based on detected language
         summarizer_pipeline = get_summarizer_pipeline(detected_lang)
 
-        # Set source and target language for multilingual models (mT5)
-        if detected_lang != "en":
-            # For mT5, we need to set the source and target language tokens
-            # The mT5_multilingual_XLSum model uses a different approach for language tokens
-            # It's usually handled by the tokenizer directly or by adding special tokens.
-            # Let's assume the pipeline handles it if we set the tokenizer's language.
-            # If issues arise, we might need to explicitly set forced_bos_token_id.
-            # For now, we'll rely on the pipeline's default behavior for multilingual.
-            # The user's requirement is "İngilizce dışı girdiler aynı dilde özetlenmeli (mT5 tercih)."
-            # This implies the model should output in the source language.
-            # The pipeline should handle this if the model is truly multilingual.
-            # We will remove the explicit src_lang and tgt_lang setting on tokenizer for now,
-            # as it caused issues before and the pipeline might manage it.
-            pass # No explicit src_lang/tgt_lang setting for mT5 pipeline for now
+        # Define length ratios based on the length parameter
+        length_ratios = {
+            "short": (0.15, 0.30),
+            "medium": (0.30, 0.60),
+            "long": (0.50, 0.80)
+        }
+        min_ratio, max_ratio = length_ratios.get(length, (0.30, 0.60))
 
         # Calculate dynamic min_length and max_length
         words = len(text.split())
-        min_length = max(5, int(words * 0.40))
-        max_length = min(200, int(words * 0.80) + 20)
+        min_length = max(10, int(words * min_ratio))
+        max_length = min(300, int(words * max_ratio) + 20)
 
         # Ensure max_length is not less than min_length
         if max_length < min_length:
-            max_length = min_length + 10 # Add a small buffer
-
-        # Ensure min_length is not too large for very short texts
-        if min_length > words:
-            min_length = words // 2 if words > 0 else 1
-
-        # Ensure max_length is not too large for very short texts
-        if max_length > words:
-            max_length = words - 1 if words > 1 else 1
-
-
-        # BART's maximum input length is typically 1024 tokens.
-        # Text is truncated if too long for the model.
-        # The pipeline usually handles this, but we keep the check for safety.
-        # max_input_length = summarizer_pipeline.model.config.max_position_embeddings
-        # if len(text) > max_input_length * 4: # Approximate (1 token ~ 4 characters)
-        #     text = text[:max_input_length * 4]
+            max_length = min_length + 15
 
         summary_list = summarizer_pipeline(
             text,
@@ -95,42 +75,119 @@ def summarize_chunk(text: str) -> str:
     except Exception as e:
         return f"Özetleme sırasında bir hata oluştu: {e}"
 
-def summarize_long_text(long_text: str) -> str:
+def extract_keywords(text: str, lang_code: str = "en") -> list[str]:
     """
-    Uzun metinleri parçalara ayırarak ve özetleri tekrar özetleyerek özetler.
+    Extracts keywords from the given text using YAKE.
     """
-    # İlk özetleme aşaması
-    chunks = split_text_into_chunks(long_text)
-    
-    if not chunks:
-        return "Özetlenecek metin bulunamadı."
+    try:
+        # YAKE language codes are typically the first two letters (e.g., 'en', 'tr')
+        language = lang_code[:2]
+        kw_extractor = yake.KeywordExtractor(lan=language, top=5, n=2)
+        keywords = kw_extractor.extract_keywords(text)
+        return [kw[0] for kw in keywords]
+    except Exception as e:
+        print(f"Keyword extraction failed: {e}")
+        return []
 
-    chunk_summaries = []
-    for i, chunk in enumerate(chunks):
-        print(f"Parça {i+1}/{len(chunks)} özetleniyor...")
-        summary = summarize_chunk(chunk)
-        # Apply clean_summary to each chunk summary
-        if not summary.startswith("Özetleme sırasında bir hata oluştu:"): # Check for error messages
-            summary = clean_summary(summary)
+def download_nltk_data():
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except nltk.downloader.DownloadError:
+        print("Downloading NLTK 'punkt' model...")
+        nltk.download('punkt')
+        print("NLTK 'punkt' model downloaded.")
+
+# Call this on module load to ensure 'punkt' is available
+download_nltk_data()
+
+def summarize_lexrank(text: str, lang: str = "english", sentences_count: int = 5) -> str:
+    """
+    Generates an extractive summary using Sumy (LexRank).
+    """
+    try:
+        parser = PlaintextParser.from_string(text, Tokenizer(lang))
+        summarizer = LexRankSummarizer()
+        summary = summarizer(parser.document, sentences_count)
+        return " ".join([str(sentence) for sentence in summary])
+    except Exception as e:
+        return f"Extractive summarization (LexRank) failed: {e}"
+
+def summarize_textrank(text: str, lang: str = "english", sentences_count: int = 5) -> str:
+    """
+    Generates an extractive summary using Sumy (TextRank).
+    """
+    try:
+        parser = PlaintextParser.from_string(text, Tokenizer(lang))
+        summarizer = TextRankSummarizer()
+        summary = summarizer(parser.document, sentences_count)
+        return " ".join([str(sentence) for sentence in summary])
+    except Exception as e:
+        return f"Extractive summarization (TextRank) failed: {e}"
+
+def summarize_extractive(text: str, lang: str = "english", sentences_count: int = 5) -> str:
+    """
+    Generates an extractive summary using Sumy (LSA).
+    """
+    try:
+        parser = PlaintextParser.from_string(text, Tokenizer(lang))
+        summarizer = LsaSummarizer()
+        summary = summarizer(parser.document, sentences_count)
+        return " ".join([str(sentence) for sentence in summary])
+    except Exception as e:
+        return f"Extractive summarization failed: {e}"
+
+def summarize_long_text(long_text: str, user_id: str = None, length: str = "medium", summary_type: str = "abstractive", extractive_method: str = "lsa") -> dict:
+    """
+    Summarizes long texts and extracts keywords.
+    Returns a dictionary with 'summary' and 'keywords'.
+    """
+    # Detect language for keyword extraction and extractive summarization
+    detected_lang = "en"
+    try:
+        detected_lang = detect(long_text)
+    except:
+        pass
+
+    # Extract keywords from the original full text
+    keywords = extract_keywords(long_text, lang_code=detected_lang)
+
+    # --- Summarization Process ---
+    if summary_type == "extractive":
+        # Determine number of sentences based on length
+        length_map = {"short": 3, "medium": 5, "long": 8}
+        num_sentences = length_map.get(length, 5)
         
-        if summary.startswith("API isteği sırasında bir hata oluştu:") or \
-           summary.startswith("API'den beklenmedik yanıt yapısı:") or \
-           summary.startswith("Yapılandırma hatası:") or \
-           summary.startswith("Özetleme sırasında beklenmeyen bir hata oluştu:") :
-            print(f"Hata: Parça {i+1} özetlenirken hata oluştu: {summary}")
-            return summary # Hata durumunda dur
-        chunk_summaries.append(summary)
-    
-    combined_summary = "\n\n".join(chunk_summaries)
-    print("\n--- Ara Özetler Birleştirildi ---")
-    print(combined_summary)
-    print("-----------------------------------")
-    
-    # İkinci özetleme aşaması (özetlerin özeti)
-    # Eğer birleştirilmiş özet hala çok uzunsa, tekrar özetle
-    if len(combined_summary) > MAX_CHUNK_CHARS * 1.5: # Eğer birleştirilmiş özet hala uzunsa
-        print("Birleştirilmiş özet çok uzun, özetlerin özeti oluşturuluyor...")
-        final_summary = summarize_chunk(combined_summary)
-        return final_summary
-    else:
-        return combined_summary
+        # Map langdetect code to sumy language name
+        sumy_lang_map = {"en": "english", "tr": "turkish"} # Add more mappings as needed
+        sumy_lang = sumy_lang_map.get(detected_lang, "english")
+
+        if extractive_method == "lexrank":
+            summary_text = summarize_lexrank(long_text, lang=sumy_lang, sentences_count=num_sentences)
+        elif extractive_method == "textrank":
+            summary_text = summarize_textrank(long_text, lang=sumy_lang, sentences_count=num_sentences)
+        else: # Default to LSA
+            summary_text = summarize_extractive(long_text, lang=sumy_lang, sentences_count=num_sentences)
+    else: # Default to abstractive
+        chunks = split_text_into_chunks(long_text)
+        if not chunks:
+            return {"summary": "Could not find text to summarize.", "keywords": keywords}
+
+        chunk_summaries = []
+        for i, chunk in enumerate(chunks):
+            print(f"Summarizing chunk {i+1}/{len(chunks)}...")
+            summary = summarize_chunk(chunk, length=length)
+            if "hata" in summary.lower():
+                return {"summary": summary, "keywords": keywords} # Return error with keywords
+            chunk_summaries.append(summary)
+        
+        combined_summary = "\n\n".join(chunk_summaries)
+        
+        if len(combined_summary) > MAX_CHUNK_CHARS * 1.5:
+            print("Combined summary is too long, creating a summary of summaries...")
+            summary_text = summarize_chunk(combined_summary, length="medium")
+        else:
+            summary_text = combined_summary
+
+    cleaned_summary = clean_summary(summary_text)
+
+    return {"summary": cleaned_summary, "keywords": keywords}

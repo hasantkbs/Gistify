@@ -1,78 +1,113 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query
 from pydantic import BaseModel
 import os
+import tempfile
+from enum import Enum
+from .deps import get_current_user
 
 from core.summarizer import summarize_long_text
 from input_handlers.pdf_handler import read_pdf_text
 from input_handlers.docx_handler import read_docx_text
 from input_handlers.text_handler import read_text_file
-from core.utils import clean_summary # Assuming clean_summary is in core.utils
+from core.utils import clean_summary
 
 router = APIRouter()
 
-class SummarizeRequest(BaseModel):
-    text: str
+class SummaryLength(str, Enum):
+    short = "short"
+    medium = "medium"
+    long = "long"
 
-class SummarizeFileRequest(BaseModel):
-    file_path: str
+class SummaryType(str, Enum):
+    abstractive = "abstractive"
+    extractive = "extractive"
 
-@router.post("/summarize")
-async def summarize_text(request: SummarizeRequest):
+class ExtractiveMethod(str, Enum):
+    lsa = "lsa"
+    lexrank = "lexrank"
+    textrank = "textrank"
+
+class SummarizeResponse(BaseModel):
+    summary: str
+    keywords: list[str]
+
+@router.post("/summarize", response_model=SummarizeResponse)
+async def summarize_text(
+    request: SummarizeRequest, 
+    summary_length: SummaryLength = Query("medium", description="The desired length of the summary."),
+    summary_type: SummaryType = Query("abstractive", description="The type of summarization to perform."),
+    extractive_method: ExtractiveMethod = Query("lsa", description="The extractive summarization method to use."),
+    user: dict = Depends(get_current_user)
+):
     """
     Summarizes the provided text.
     """
     text = request.text
     if not text:
-        return {"error": "No text provided for summarization."}
+        raise HTTPException(status_code=400, detail="No text provided for summarization.")
     
-    summary = summarize_long_text(text)
-    if summary.startswith("Özetleme sırasında bir hata oluştu:") or \
-       summary.startswith("API isteği sırasında bir hata oluştu:") or \
-       summary.startswith("API'den beklenmedik yanıt yapısı:") or \
-       summary.startswith("Yapılandırma hatası:") or \
-       summary.startswith("Özetleme sırasında beklenmeyen bir hata oluştu:") :
-        return {"error": summary}
+    result = summarize_long_text(text, user_id=user["uid"], length=summary_length.value, summary_type=summary_type.value, extractive_method=extractive_method.value)
+    if "hata" in result["summary"].lower() or "failed" in result["summary"].lower():
+        raise HTTPException(status_code=500, detail=result["summary"])
     
-    cleaned_summary = clean_summary(summary)
-    return {"summary": cleaned_summary}
+    return result
 
-@router.post("/summarize_file")
-async def summarize_file(request: SummarizeFileRequest):
+@router.post("/summarize_file", response_model=SummarizeResponse)
+async def summarize_file(
+    file: UploadFile = File(...), 
+    summary_length: SummaryLength = Query("medium", description="The desired length of the summary."),
+    summary_type: SummaryType = Query("abstractive", description="The type of summarization to perform."),
+    extractive_method: ExtractiveMethod = Query("lsa", description="The extractive summarization method to use."),
+    user: dict = Depends(get_current_user)
+):
     """
-    Summarizes the content of a file.
+    Summarizes the content of an uploaded file.
     Supports .txt, .pdf, and .docx files.
     """
-    file_path = request.file_path
-    if not os.path.exists(file_path):
-        return {"error": f"File not found: {file_path}"}
+    file_extension = os.path.splitext(file.filename)[1].lower()
+    supported_formats = [".txt", ".pdf", ".docx"]
 
-    file_extension = os.path.splitext(file_path)[1].lower()
+    if file_extension not in supported_formats:
+        raise HTTPException(status_code=400, detail=f"Unsupported file format: {file_extension}. Only .txt, .pdf, and .docx are supported.")
+
+    # Save uploaded file to a temporary file to be read by handlers
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as tmp:
+            tmp.write(await file.read())
+            tmp_path = tmp.name
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not save uploaded file: {e}")
+
     text = ""
-    if file_extension == ".txt":
-        text = read_text_file(file_path)
-        if text.startswith("Metin dosyası okuma hatası:"):
-            return {"error": text}
-    elif file_extension == ".pdf":
-        text = read_pdf_text(file_path)
-        if text.startswith("PDF okuma hatası:"):
-            return {"error": text}
-    elif file_extension == ".docx":
-        text = read_docx_text(file_path)
-        if text.startswith("DOCX okuma hatası:"):
-            return {"error": text}
-    else:
-        return {"error": f"Unsupported file format: {file_extension}. Only .txt, .pdf, and .docx are supported."}
+    try:
+        if file_extension == ".txt":
+            text = read_text_file(tmp_path)
+        elif file_extension == ".pdf":
+            text = read_pdf_text(tmp_path)
+        elif file_extension == ".docx":
+            text = read_docx_text(tmp_path)
+        
+        if "hata" in text.lower():
+             raise HTTPException(status_code=500, detail=text)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading file content: {e}")
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path) # Clean up the temporary file
 
     if not text:
-        return {"error": "Could not read text from the file or file is empty."}
+        raise HTTPException(status_code=400, detail="Could not read text from the file or file is empty.")
 
-    summary = summarize_long_text(text)
-    if summary.startswith("Özetleme sırasında bir hata oluştu:") or \
-       summary.startswith("API isteği sırasında bir hata oluştu:") or \
-       summary.startswith("API'den beklenmedik yanıt yapısı:") or \
-       summary.startswith("Yapılandırma hatası:") or \
-       summary.startswith("Özetleme sırasında beklenmeyen bir hata oluştu:") :
-        return {"error": summary}
+    result = summarize_long_text(text, user_id=user["uid"], length=summary_length.value, summary_type=summary_type.value, extractive_method=extractive_method.value)
+    if "hata" in result["summary"].lower() or "failed" in result["summary"].lower():
+        raise HTTPException(status_code=500, detail=result["summary"])
     
-    cleaned_summary = clean_summary(summary)
-    return {"summary": cleaned_summary}
+    return result
+
+@router.get("/health")
+async def health_check():
+    """
+    Health check endpoint to verify that the service is running.
+    """
+    return {"status": "ok"}
