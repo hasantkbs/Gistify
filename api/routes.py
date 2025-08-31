@@ -1,9 +1,11 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, status
 from pydantic import BaseModel
 import os
 import tempfile
 from enum import Enum
 from .deps import get_current_user
+from .crud import update_user_subscription, increment_summary_count
+from .models import UserSubscription
 
 from core.summarizer import summarize_long_text
 from input_handlers.pdf_handler import read_pdf_text
@@ -31,6 +33,9 @@ class SummarizeResponse(BaseModel):
     summary: str
     keywords: list[str]
 
+class SummarizeRequest(BaseModel):
+    text: str
+
 @router.post("/summarize", response_model=SummarizeResponse)
 async def summarize_text(
     request: SummarizeRequest, 
@@ -46,10 +51,20 @@ async def summarize_text(
     if not text:
         raise HTTPException(status_code=400, detail="No text provided for summarization.")
     
-    result = summarize_long_text(text, user_id=user["uid"], length=summary_length.value, summary_type=summary_type.value, extractive_method=extractive_method.value)
+    # # Subscription check
+    # if not user['subscription']['is_subscribed'] and user['subscription']['summaries_this_month'] >= 5:
+    #     raise HTTPException(
+    #         status_code=status.HTTP_403_FORBIDDEN,
+    #         detail="Free users are limited to 5 summaries per month. Please subscribe to remove this limit."
+    #     )
+
+    result = summarize_long_text(text, length=summary_length.value)
     if "hata" in result["summary"].lower() or "failed" in result["summary"].lower():
         raise HTTPException(status_code=500, detail=result["summary"])
     
+    # # Increment summary count
+    # await increment_summary_count(user['uid'])
+
     return result
 
 @router.post("/summarize_file", response_model=SummarizeResponse)
@@ -86,11 +101,8 @@ async def summarize_file(
             text = read_pdf_text(tmp_path)
         elif file_extension == ".docx":
             text = read_docx_text(tmp_path)
-        
-        if "hata" in text.lower():
-             raise HTTPException(status_code=500, detail=text)
-
     except Exception as e:
+        # Re-raise exceptions from file readers with more context.
         raise HTTPException(status_code=500, detail=f"Error reading file content: {e}")
     finally:
         if os.path.exists(tmp_path):
@@ -99,11 +111,38 @@ async def summarize_file(
     if not text:
         raise HTTPException(status_code=400, detail="Could not read text from the file or file is empty.")
 
-    result = summarize_long_text(text, user_id=user["uid"], length=summary_length.value, summary_type=summary_type.value, extractive_method=extractive_method.value)
+    # # Subscription check
+    # if not user['subscription']['is_subscribed'] and user['subscription']['summaries_this_month'] >= 5:
+    #     raise HTTPException(
+    #         status_code=status.HTTP_403_FORBIDDEN,
+    #         detail="Free users are limited to 5 summaries per month. Please subscribe to remove this limit."
+    #     )
+
+    result = summarize_long_text(text, length=summary_length.value)
     if "hata" in result["summary"].lower() or "failed" in result["summary"].lower():
         raise HTTPException(status_code=500, detail=result["summary"])
     
+    # # Increment summary count
+    # await increment_summary_count(user['uid'])
+
     return result
+
+@router.get("/users/me", response_model=UserSubscription)
+async def read_users_me(user: dict = Depends(get_current_user)):
+    """
+    Get current user's subscription status and usage.
+    """
+    return UserSubscription(**user['subscription'])
+
+@router.post("/subscribe")
+async def subscribe_user(user: dict = Depends(get_current_user)):
+    """
+    Mock endpoint to simulate user subscription.
+    Sets is_subscribed to True for the current user.
+    """
+    uid = user['uid']
+    await update_user_subscription(uid, {"is_subscribed": True})
+    return {"message": "Subscription successful (mock)."}
 
 @router.get("/health")
 async def health_check():
