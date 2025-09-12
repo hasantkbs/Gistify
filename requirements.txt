@@ -13,5 +13,4 @@ sumy==0.11.0
 nltk==3.8.1
 requests==2.31.0
 beautifulsoup4==4.12.3
-sentencepiece==0.2.0
-rq==1.15.0
+celery[redis]==5.4.0
