@@ -1,4 +1,10 @@
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 # Model names for the summarization pipelines
-BART_MODEL_NAME = "facebook/bart-large-cnn"
-MT5_MODEL_NAME = "csebuetnlp/mT5_multilingual_XLSum"
-TURKISH_MODEL_NAME = "ozcangundes/mt5-small-turkish-summarization"
+ENGLISH_MODEL_NAME = os.getenv("ENGLISH_MODEL_NAME", "google/pegasus-cnn_dailymail")
+TURKISH_MODEL_NAME = os.getenv("TURKISH_MODEL_NAME", "ozcangundes/mt5-small-turkish-summarization")
+MT5_MODEL_NAME = os.getenv("MT5_MODEL_NAME", "google/mt5-small")

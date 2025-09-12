@@ -19,9 +19,9 @@ def test_summarize_text_success():
     # This is a basic test. For a real-world scenario, 
     # you might mock the summarizer to avoid long processing times.
     response = client.post("/summarize", json={"text": "This is a test sentence for summarization."})
-    assert response.status_code == 200
-    assert "summary" in response.json()
-    assert len(response.json()["summary"]) > 0
+    assert response.status_code == 202
+    assert "task_id" in response.json()
+    assert response.json()["status"] == "Processing"
 
 def test_summarize_text_no_text():
     """

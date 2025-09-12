@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-# pick a real summarization model for TR; BART for EN; mT5 otherwise
-BART_MODEL_NAME = "facebook/bart-large-cnn"
-TURKISH_MODEL_NAME = "csebuetnlp/mT5_multilingual_XLSum"  # TR summarization
-MT5_MODEL_NAME = "google/mt5-small"
+from config.settings import ENGLISH_MODEL_NAME, MT5_MODEL_NAME, TURKISH_MODEL_NAME
 
 from typing import Dict, List, Tuple
 from dataclasses import dataclass
@@ -105,7 +102,7 @@ def _pick_model_for_lang(lang_code: str) -> str:
     if lang_code.startswith("tr"):
         return TURKISH_MODEL_NAME
     if lang_code.startswith("en"):
-        return BART_MODEL_NAME
+        return ENGLISH_MODEL_NAME
     return MT5_MODEL_NAME
 
 
@@ -115,10 +112,13 @@ def _get_summarizer_pipeline(lang_code: str):
         return _PIPELINES[model_name]
 
     # T5/mT5: avoid fast tokenizer UNKs and use new behavior
+    print(f"Loading model: {model_name}")
     if "t5" in model_name.lower():
         tok = AutoTokenizer.from_pretrained(model_name, use_fast=False, legacy=False, model_max_length=512)
+        print(f"  model_max_length: 512 (T5 model)")
     else:
         tok = AutoTokenizer.from_pretrained(model_name, model_max_length=1024)
+        print(f"  model_max_length: 1024 (Non-T5 model)")
     mdl = AutoModelForSeq2SeqLM.from_pretrained(model_name)
 
     _PIPELINES[model_name] = pipeline("summarization", model=mdl, tokenizer=tok)
@@ -134,6 +134,7 @@ def _ratio_to_lengths(text: str, length_key: str) -> Tuple[int, int]:
 
 
 def summarize_with_hf(text: str, detected_lang: str, length_key: str) -> str:
+    print(f"Summarizing text (length: {len(text)}) with HF model for lang: {detected_lang}")
     summarizer = _get_summarizer_pipeline(detected_lang)
     min_len, max_len = _ratio_to_lengths(text, length_key)
     out = summarizer(
@@ -186,37 +187,48 @@ def summarize_text(text: str, length: str = "medium", summary_type: str = "abstr
         detected_lang = "en"
 
     def _sent_count_for_len(len_key: str) -> int:
-        return 4 if len_key == "short" else (10 if len_key == "long" else 6)
+        if len_key == "short":
+            return 4
+        if len_key == "long":
+            return 10
+        return 6
 
+    summary_out = ""
     if summary_type.lower() == "extractive":
         method = extractive_method.lower()
         if method not in {"lsa", "lexrank", "textrank"}:
             method = "textrank"
         summary_out = summarize_with_sumy(text, method=method, sentence_count=_sent_count_for_len(length))
     else:
-        base_text = text
-        if summary_type.lower() == "hybrid":
-            method = extractive_method.lower() if extractive_method else "textrank"
-            if method not in {"lsa", "lexrank", "textrank"}:
-                method = "textrank"
-            base_text = summarize_with_sumy(text, method=method, sentence_count=max(8, _sent_count_for_len(length) * 2))
+        # Improved Hybrid Approach
+        # 1. Get the extractive summary to serve as the context/skeleton.
+        # Use a slightly larger sentence count for the extractive step to provide more context.
+        extractive_sentence_count = max(8, _sent_count_for_len(length) * 2)
+        extractive_summary = summarize_with_sumy(text, method="lexrank", sentence_count=extractive_sentence_count)
 
-        chunks = split_text_into_chunks(base_text, INPUT_CHARS_PER_CHUNK)
-        partials: List[str] = []
-        for ch in chunks:
-            try:
-                s = summarize_with_hf(ch, detected_lang, length)
-            except Exception:
-                s = summarize_with_sumy(ch, method="textrank", sentence_count=5)
-            partials.append(_clean_summary(s))
-        combined = "\n\n".join(partials).strip()
-        if len(combined) > SECOND_PASS_THRESHOLD:
-            try:
-                combined = summarize_with_hf(combined, detected_lang, length)
-            except Exception:
-                combined = summarize_with_sumy(combined, method="lexrank", sentence_count=7)
-            combined = _clean_summary(combined)
-        summary_out = combined
+        # 2. Use the extractive summary as the input for the abstractive model.
+        # This helps the model focus on the most important parts of the text.
+        if len(extractive_summary) > INPUT_CHARS_PER_CHUNK:
+             # If the extractive summary is still too long, chunk it.
+             chunks = split_text_into_chunks(extractive_summary, INPUT_CHARS_PER_CHUNK)
+             partials: List[str] = []
+             for ch in chunks:
+                 try:
+                     s = summarize_with_hf(ch, detected_lang, length)
+                 except Exception:
+                     s = summarize_with_sumy(ch, method="textrank", sentence_count=5)
+                 partials.append(_clean_summary(s))
+             combined = "\n\n".join(partials).strip()
+             if len(combined) > SECOND_PASS_THRESHOLD:
+                 try:
+                     combined = summarize_with_hf(combined, detected_lang, length)
+                 except Exception:
+                     combined = summarize_with_sumy(combined, method="lexrank", sentence_count=7)
+                 combined = _clean_summary(combined)
+             summary_out = combined
+        else:
+             summary_out = summarize_with_hf(extractive_summary, detected_lang, length)
+
 
     try:
         kws = extract_keywords(text, detected_lang)
