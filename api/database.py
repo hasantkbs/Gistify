@@ -1,30 +1,36 @@
-import firebase_admin
-from firebase_admin import credentials, firestore_async
-import os
-from dotenv import load_dotenv
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
 
-# Load environment variables from .env file
-load_dotenv()
+# Define the database file path
+DATABASE_URL = "sqlite:///./database/gistify.db"
 
-# Global Firestore client
-_db = None # Use a private name for the global variable
+# Create the SQLAlchemy engine
+engine = create_engine(
+    DATABASE_URL, connect_args={"check_same_thread": False}
+)
 
-def initialize_firebase_db():
-    global _db
-    cred_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_KEY_PATH")
-    print(f"Attempting to load Firebase credentials from: {cred_path}")
-    if not cred_path:
-        raise ValueError("FIREBASE_SERVICE_ACCOUNT_KEY_PATH environment variable not set.")
-    if not os.path.exists(cred_path):
-        raise FileNotFoundError(f"Firebase service account key file not found at: {cred_path}")
-    
-    cred = credentials.Certificate(cred_path)
-    if not firebase_admin._apps:
-        firebase_admin.initialize_app(cred)
-    _db = firestore_async.client() # Use the async client
-    print("Firestore client (_db) initialized.")
+# Create a SessionLocal class for database sessions
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-def get_firestore_db():
-    if _db is None:
-        raise RuntimeError("Firestore client not initialized. Call initialize_firebase_db() first.")
-    return _db
+# Create a Base class for declarative models
+Base = declarative_base()
+
+def get_db():
+    """
+    Dependency to get a database session.
+    """
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def init_db():
+    """
+    Initializes the database by creating all tables.
+    """
+    # Import all models here before calling create_all
+    # so that they are registered on the metadata.
+    from . import models
+    Base.metadata.create_all(bind=engine)
+    print("Database initialized.")

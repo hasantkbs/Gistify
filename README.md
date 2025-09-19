@@ -36,6 +36,8 @@ Gistify/
 
 ## Setup
 
+Gistify'nin çalışması için gerekli bağımlılıklar `requirements.txt` dosyasında, geliştirme ve test için ek bağımlılıklar ise `requirements-dev.txt` dosyasında listelenmiştir.
+
 1.  **Ensure Python 3.8+ and pip are installed.**
 
 2.  **Create and Activate a Virtual Environment:**

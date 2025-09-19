@@ -1,50 +1,28 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-import firebase_admin
-from firebase_admin import auth, credentials
-from .crud import get_user_subscription
-from .models import UserSubscription
+from sqlalchemy.orm import Session
+from jose import JWTError
+from . import auth, crud, models, schemas
+from .database import get_db
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> schemas.User:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
     try:
-        decoded_token = auth.verify_id_token(token)
-        
-        if decoded_token is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not decode token",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-        # Fetch user's subscription data from Firestore
-        user_subscription = await get_user_subscription(decoded_token['uid'])
-        
-        if user_subscription is None:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Could not retrieve user subscription data.",
-            )
-
-        # Add subscription data to the decoded token
-        decoded_token['subscription'] = user_subscription.dict()
-        
-        return decoded_token
-    except auth.ExpiredIdTokenError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has expired",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    except auth.InvalidIdTokenError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An error occurred during token verification: {e}",
-        )
+        payload = auth.verify_token(token, credentials_exception)
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+        token_data = schemas.TokenData(username=email)
+    except JWTError:
+        raise credentials_exception
+    
+    user = crud.get_user_by_email(db, email=token_data.username)
+    if user is None:
+        raise credentials_exception
+    return user

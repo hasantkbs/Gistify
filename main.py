@@ -2,8 +2,10 @@ from core.summarizer import summarize_long_text
 from input_handlers.pdf_handler import read_pdf_text
 from input_handlers.docx_handler import read_docx_text
 import os
+import sys
+from api import database
 
-if __name__ == "__main__":
+def main_cli():
     print("Gistify Summarization CLI")
     print("------------------------")
 
@@ -56,3 +58,11 @@ if __name__ == "__main__":
             print("---------------\n")
         else:
             print("No text to summarize. Please try again.")
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "init-db":
+        print("Initializing the database...")
+        database.init_db()
+        print("Database initialization complete.")
+    else:
+        main_cli()

@@ -60,11 +60,11 @@ def test_read_docx_text_not_found():
 
 # --- Tests for pdf_handler ---
 
-@patch('builtins.open', new_callable=MagicMock)
-@patch('input_handlers.pdf_handler.PyPDF2.PdfReader')
-def test_read_pdf_text(mock_pdf_reader, mock_open):
+# Mock for pypdf
+@patch('input_handlers.pdf_handler.pypdf.PdfReader')
+def test_read_pdf_text_success(mock_pdf_reader):
     """
-    Tests reading a .pdf file by mocking the PyPDF2 library and file open.
+    Tests reading a .pdf file by mocking the pypdf library and file open.
     """
     mock_pdf_reader.return_value = MockPdfReader(["This is a pdf test.", "It has pages."])
     
