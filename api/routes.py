@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import List, Optional
 from datetime import datetime, timedelta
-from fastapi import APIRouter, UploadFile, File, Query, status, Depends, HTTPException
+from fastapi import APIRouter, UploadFile, File, Query, status, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 import os
@@ -33,6 +33,10 @@ from core.exceptions import (
 )
 from core import cache, finetuner # Import the finetuner module
 from core.entity_extractor import extract_entities # Import the entity extractor
+from core.qa import answer_question_from_summary
+from core.streaming_summarizer import StreamingSummarizer
+from core.webhook_dispatcher import dispatch_webhook
+
 from . import crud, schemas, auth, deps, models
 from .database import get_db
 
@@ -40,6 +44,22 @@ router = APIRouter()
 auth_router = APIRouter()
 finetune_router = APIRouter()
 webhook_router = APIRouter()
+qa_router = APIRouter()
+
+@qa_router.post("/", response_model=schemas.QAResponse)
+def answer_question(
+    request: schemas.QARequest,
+    current_user: schemas.User = Depends(deps.get_current_user),
+):
+    """
+    Answers a question based on a given summary.
+    """
+    if not request.question or not request.summary:
+        raise HTTPException(status_code=400, detail="Question and summary must be provided.")
+
+    answer = answer_question_from_summary(request.question, request.summary)
+    return answer
+
 
 # --- Enums and Pydantic Models ---
 
@@ -66,6 +86,11 @@ class UrlRequest(BaseModel):
 class TaskResponse(BaseModel):
     task_id: str
     status: str
+
+class Sentiment(BaseModel):
+    label: str
+    score: float
+
 
 class SummarizeResponse(BaseModel):
     summary: str
@@ -226,6 +251,7 @@ def summarize_text(
     summary_length: SummaryLength = Query(SummaryLength.medium, alias="summary_length"),
     summary_type: SummaryType = Query(SummaryType.abstractive, alias="summary_type"),
     extractive_method: ExtractiveMethod = Query(ExtractiveMethod.lsa, alias="extractive_method"),
+    tone: Tone = Query(Tone.neutral, alias="tone"),
     finetuned_model_id: Optional[int] = Query(None, alias="finetuned_model_id"), # New parameter
     current_user: schemas.User = Depends(deps.get_current_user),
 ):
@@ -238,6 +264,7 @@ def summarize_text(
         summary_length.value,
         summary_type.value,
         extractive_method.value,
+        tone.value,
         current_user.id,
         finetuned_model_id, # Pass new parameter
     )
@@ -444,6 +471,19 @@ def process_summary_task(text, length, summary_type, extractive_method, user_id,
             entities=entities # Save entities to history
         )
         crud.create_summary_history(db, user, summary_data)
+
+        # Dispatch webhooks
+        webhooks = crud.get_webhooks(db, user_id)
+        for webhook in webhooks:
+            if webhook.event_type == "summary_completed":
+                payload = {
+                    "task_id": "N/A", # Task ID is not directly available here
+                    "user_id": user_id,
+                    "summary": summary_result['summary'],
+                    "status": "completed",
+                    "timestamp": datetime.now().isoformat()
+                }
+                dispatch_webhook(webhook.id, payload)
     
     return summary_result
 
@@ -476,6 +516,35 @@ def process_multiple_summary_task(texts, length, summary_type, extractive_method
             entities=entities # Save entities to history
         )
         crud.create_summary_history(db, user, summary_data)
+
+        # Dispatch webhooks
+        webhooks = crud.get_webhooks(db, user_id)
+        for webhook in webhooks:
+            if webhook.event_type == "summary_completed":
+                payload = {
+                    "task_id": "N/A", # Task ID is not directly available here
+                    "user_id": user_id,
+                    "summary": summary_result['summary'],
+                    "status": "completed",
+                    "timestamp": datetime.now().isoformat()
+                }
+                dispatch_webhook(webhook.id, payload)
     
     # cache.set_to_cache(cache_key, summary_result) # Re-enable if caching is implemented for multi-doc
     return summary_result
+
+@router.websocket("/ws/summarize")
+async def websocket_summarize(websocket: WebSocket):
+    await websocket.accept()
+    summarizer = StreamingSummarizer()
+    try:
+        while True:
+            data = await websocket.receive_text()
+            summarizer.add_chunk(data)
+            summary = summarizer.get_summary()
+            await websocket.send_text(summary)
+    except WebSocketDisconnect:
+        print("Client disconnected")
+ait websocket.send_text(summary)
+    except WebSocketDisconnect:
+        print("Client disconnected")

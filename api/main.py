@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
-from .routes import router as api_router, auth_router, finetune_router, webhook_router
+from .routes import router as api_router, auth_router, finetune_router, webhook_router, qa_router
 from .database import init_db
 from core.exceptions import GistifyError, UnsupportedFileTypeError, EmptyContentError, FileProcessingError, UrlConnectionError
 
@@ -36,3 +36,4 @@ app.include_router(api_router)
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(finetune_router, prefix="/finetune", tags=["finetune"])
 app.include_router(webhook_router, prefix="/webhooks", tags=["webhooks"])
+app.include_router(qa_router, prefix="/qa", tags=["qa"])

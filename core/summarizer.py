@@ -19,6 +19,7 @@ from sumy.summarizers.text_rank import TextRankSummarizer
 from api.database import get_db
 from api import crud, models
 from sqlalchemy.orm import Session
+from core.sentiment import analyze_sentiment
 
 
 try:
@@ -101,7 +102,9 @@ _LENGTHS: Dict[str, LengthSpec] = {
     "long": LengthSpec("long", 0.4, 0.65),
 }
 
-def _pick_model_for_lang(lang_code: str, finetuned_model_id: Optional[int] = None) -> str:
+def _pick_model_for_lang(lang_code: str, finetuned_model_id: Optional[int] = None, tone: str = "neutral") -> str:
+    if tone != "neutral":
+        return "t5-base"
     if finetuned_model_id:
         # In a real scenario, you would load the fine-tuned model path from the DB
         # and then load the model from that path.
@@ -148,13 +151,16 @@ def _ratio_to_lengths(text: str, length_key: str) -> Tuple[int, int]:
     return (min_len, max_len)
 
 
-def summarize_with_hf(text: str, detected_lang: str, length_key: str, finetuned_model_id: Optional[int] = None) -> str:
+def summarize_with_hf(text: str, detected_lang: str, length_key: str, tone: str, finetuned_model_id: Optional[int] = None) -> str:
     print(f"Summarizing text (length: {len(text)}) with HF model for lang: {detected_lang}")
-    model_identifier = _pick_model_for_lang(detected_lang, finetuned_model_id) # Pass finetuned_model_id
+    model_identifier = _pick_model_for_lang(detected_lang, finetuned_model_id, tone)
     summarizer = _get_summarizer_pipeline(model_identifier)
     min_len, max_len = _ratio_to_lengths(text, length_key)
+
+    prompt = f"Rewrite the following text in a {tone} and professional tone, summarizing the key information: {text}"
+
     out = summarizer(
-        text,
+        prompt,
         min_length=min_len,
         max_length=max_len,
         do_sample=False,
@@ -192,10 +198,10 @@ def extract_keywords(text: str, lang_code: str | None = None, top_k: int = 8) ->
 
 # ---------- Ana API ----------
 
-def summarize_text(text: str, length: str = "medium", summary_type: str = "abstractive", extractive_method: str = "textrank", user_id: str | None = None, finetuned_model_id: Optional[int] = None) -> dict:
+def summarize_text(text: str, length: str = "medium", summary_type: str = "abstractive", extractive_method: str = "textrank", tone: str = "neutral", user_id: str | None = None, finetuned_model_id: Optional[int] = None) -> dict:
     text = _preclean_text(text or "")
     if not text:
-        return {"summary": "", "keywords": [], "lang": ""}
+        return {"summary": "", "keywords": [], "lang": "", "sentiment": {"label": "neutral", "score": 0.0}}
 
     try:
         detected_lang = detect(text)
@@ -230,20 +236,20 @@ def summarize_text(text: str, length: str = "medium", summary_type: str = "abstr
              partials: List[str] = []
              for ch in chunks:
                  try:
-                     s = summarize_with_hf(ch, detected_lang, length, finetuned_model_id) # Pass finetuned_model_id
+                     s = summarize_with_hf(ch, detected_lang, length, tone, finetuned_model_id) # Pass finetuned_model_id
                  except Exception:
                      s = summarize_with_sumy(ch, method="textrank", sentence_count=5)
                  partials.append(_clean_summary(s))
              combined = "\n\n".join(partials).strip()
              if len(combined) > SECOND_PASS_THRESHOLD:
                  try:
-                     combined = summarize_with_hf(combined, detected_lang, length, finetuned_model_id) # Pass finetuned_model_id
+                     combined = summarize_with_hf(combined, detected_lang, length, tone, finetuned_model_id) # Pass finetuned_model_id
                  except Exception:
                      combined = summarize_with_sumy(combined, method="lexrank", sentence_count=7)
                  combined = _clean_summary(combined)
              summary_out = combined
         else:
-             summary_out = summarize_with_hf(extractive_summary, detected_lang, length, finetuned_model_id) # Pass finetuned_model_id
+             summary_out = summarize_with_hf(extractive_summary, detected_lang, length, tone, finetuned_model_id) # Pass finetuned_model_id
 
 
     try:
@@ -251,7 +257,9 @@ def summarize_text(text: str, length: str = "medium", summary_type: str = "abstr
     except Exception:
         kws = []
 
-    return {"summary": _clean_summary(summary_out), "keywords": kws, "lang": detected_lang}
+    sentiment = analyze_sentiment(summary_out)
+
+    return {"summary": _clean_summary(summary_out), "keywords": kws, "lang": detected_lang, "sentiment": sentiment}
 
 
 def summarize_long_text(text: str, user_id: str | None = None, length: str = "medium", summary_type: str = "abstractive", extractive_method: str = "textrank", finetuned_model_id: Optional[int] = None) -> dict:

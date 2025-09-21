@@ -30,6 +30,14 @@ class FinetuneModelCreate(FinetuneModelBase):
 
     model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
+class FinetuneModel(FinetuneModelBase):
+    id: int
+    user_id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
+
 class FinetuneDatasetBase(BaseModel):
     file_path: str
 
@@ -37,6 +45,14 @@ class FinetuneDatasetCreate(FinetuneDatasetBase):
     pass
 
     model_config = ConfigDict(from_attributes=True)
+
+class FinetuneDataset(FinetuneDatasetBase):
+    id: int
+    user_id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
 
 class WebhookBase(BaseModel):
     url: str
@@ -105,5 +121,9 @@ class MultiSummarizeRequest(BaseModel):
     texts: List[str]
 
 
+class QARequest(BaseModel):
+    question: str
+    summary: str
 
-
+class QAResponse(BaseModel):
+    answer: str
