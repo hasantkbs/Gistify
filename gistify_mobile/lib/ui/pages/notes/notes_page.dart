@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../theme/app_colors.dart';
+import '../upload/upload_page.dart';
 
 class NotesPage extends StatelessWidget {
   const NotesPage({super.key});
@@ -46,7 +47,9 @@ class NotesPage extends StatelessWidget {
                   ),
                   const Spacer(),
                   IconButton(
-                    onPressed: () {},
+                    onPressed: () {
+                      Navigator.pushNamed(context, UploadPage.route);
+                    },
                     icon: Container(
                       width: 40,
                       height: 40,
@@ -169,7 +172,7 @@ class _NoteCard extends StatelessWidget {
               width: double.infinity,
               height: 140,
               decoration: BoxDecoration(
-                color: AppColors.primaryBlue.withOpacity(0.12),
+                color: AppColors.primaryBlue.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(16),
               ),
             ),

@@ -26,7 +26,7 @@ class LoginPage extends StatelessWidget {
                     width: 72,
                     height: 72,
                     decoration: BoxDecoration(
-                      color: AppColors.primaryBlue.withOpacity(0.12),
+                      color: AppColors.primaryBlue.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: const Icon(
@@ -83,7 +83,11 @@ class LoginPage extends StatelessWidget {
                   ),
                   ElevatedButton(
                     onPressed: () {
-                      Navigator.pushReplacementNamed(context, MainShell.route);
+                      Navigator.pushReplacementNamed(
+                        context,
+                        MainShell.route,
+                        arguments: MainShell.notesTabIndex,
+                      );
                     },
                     child: const Text('Log In'),
                   ),

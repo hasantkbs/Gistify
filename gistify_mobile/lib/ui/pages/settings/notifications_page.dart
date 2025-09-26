@@ -73,7 +73,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
               width: 48,
               height: 48,
               decoration: BoxDecoration(
-                color: AppColors.primaryBlue.withOpacity(0.12),
+                color: AppColors.primaryBlue.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Icon(icon, color: AppColors.primaryBlue),
@@ -98,11 +98,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                 ],
               ),
             ),
-            Switch.adaptive(
-              value: value,
-              onChanged: onChanged,
-              activeColor: AppColors.primaryBlue,
-            ),
+            Switch.adaptive(value: value, onChanged: onChanged),
           ],
         ),
       ),

@@ -16,6 +16,7 @@ import 'ui/pages/settings/terms_page.dart';
 import 'ui/pages/settings/theme_page.dart';
 import 'ui/pages/settings/notifications_page.dart';
 import 'ui/theme/app_theme.dart';
+import 'ui/pages/upload/upload_page.dart';
 
 void main() {
   runApp(const GistifyApp());
@@ -34,7 +35,13 @@ class GistifyApp extends StatelessWidget {
       routes: {
         LoginPage.route: (_) => const LoginPage(),
         SignUpPage.route: (_) => const SignUpPage(),
-        MainShell.route: (_) => const MainShell(),
+        MainShell.route: (context) {
+          final initialIndex =
+              ModalRoute.of(context)?.settings.arguments as int? ??
+                  MainShell.notesTabIndex;
+          return MainShell(initialIndex: initialIndex);
+        },
+        UploadPage.route: (_) => const UploadPage(),
         PremiumPage.route: (_) => const PremiumPage(),
         DataStoragePage.route: (_) => const DataStoragePage(),
         CustomModelsPage.route: (_) => const CustomModelsPage(),

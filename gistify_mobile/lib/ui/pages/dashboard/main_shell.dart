@@ -4,26 +4,43 @@ import '../../theme/app_colors.dart';
 import '../folders/folders_page.dart';
 import '../notes/notes_page.dart';
 import '../settings/settings_page.dart';
-import '../upload/upload_page.dart';
 
 class MainShell extends StatefulWidget {
-  const MainShell({super.key});
+  const MainShell({super.key, this.initialIndex = notesTabIndex});
 
   static const route = '/home';
+  static const notesTabIndex = 0;
+  static const foldersTabIndex = 1;
+  static const settingsTabIndex = 2;
+
+  final int initialIndex;
 
   @override
   State<MainShell> createState() => _MainShellState();
 }
 
 class _MainShellState extends State<MainShell> {
-  int _currentIndex = 0;
+  late int _currentIndex;
 
   final _pages = const [
-    UploadPage(),
     NotesPage(),
     FoldersPage(),
     SettingsPage(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.initialIndex;
+  }
+
+  @override
+  void didUpdateWidget(covariant MainShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialIndex != widget.initialIndex) {
+      _currentIndex = widget.initialIndex;
+    }
+  }
 
   void _onTap(int index) {
     setState(() {
@@ -42,14 +59,6 @@ class _MainShellState extends State<MainShell> {
         surfaceTintColor: Colors.white,
         height: 72,
         destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.cloud_upload_outlined),
-            selectedIcon: Icon(
-              Icons.cloud_upload,
-              color: AppColors.primaryBlue,
-            ),
-            label: 'Upload',
-          ),
           NavigationDestination(
             icon: Icon(Icons.description_outlined),
             selectedIcon: Icon(Icons.description, color: AppColors.primaryBlue),

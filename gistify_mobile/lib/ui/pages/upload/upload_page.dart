@@ -6,6 +6,8 @@ import '../../widgets/option_tile.dart';
 class UploadPage extends StatelessWidget {
   const UploadPage({super.key});
 
+  static const route = '/upload';
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(

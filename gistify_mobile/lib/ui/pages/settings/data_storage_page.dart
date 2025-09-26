@@ -75,7 +75,7 @@ class _DataStoragePageState extends State<DataStoragePage> {
                     width: 48,
                     height: 48,
                     decoration: BoxDecoration(
-                      color: Colors.greenAccent.withOpacity(0.2),
+                      color: Colors.greenAccent.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: const Icon(Icons.sync, color: AppColors.primaryBlue),
@@ -102,7 +102,6 @@ class _DataStoragePageState extends State<DataStoragePage> {
                   ),
                   Switch.adaptive(
                     value: syncEnabled,
-                    activeColor: AppColors.primaryBlue,
                     onChanged: (value) {
                       setState(() => syncEnabled = value);
                     },
@@ -166,7 +165,7 @@ class _StorageTile extends StatelessWidget {
               width: 48,
               height: 48,
               decoration: BoxDecoration(
-                color: color.withOpacity(0.18),
+                color: color.withValues(alpha: 0.18),
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Icon(icon, color: color),
